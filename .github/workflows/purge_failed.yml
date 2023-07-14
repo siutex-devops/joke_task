@@ -1,0 +1,49 @@
+name: 'Purge Failed Runs'
+
+on:
+  schedule:
+    - cron:  '0 0 * * *' 
+  workflow_dispatch:  
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+      
+    - name: Purge Failed Runs
+      run: |
+        # Define list of workflows
+        workflows=("Destroy" "Purge Failed Runs" "eks_infra" "App_build")
+
+        # Loop over the list of workflows
+        for workflow_name in "${workflows[@]}"; do
+          # Define jq filter
+          filter='.workflows[] | select(.name=="'"$workflow_name"'") | .id'
+
+          # Get the workflow ID
+          workflow_id=$(curl \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: Bearer ${{ secrets.REPO_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows \
+            | jq "$filter")
+
+          # Get a list of all failed runs for this workflow
+          failed_runs=$(curl \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: Bearer ${{ secrets.REPO_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/$workflow_id/runs \
+            | jq -r '.workflow_runs[] | select(.conclusion=="failure") | .id')
+
+          # Loop over the list of failed runs and delete each one
+          for run_id in $failed_runs; do
+            curl \
+              -X DELETE \
+              -H "Accept: application/vnd.github.v3+json" \
+              -H "Authorization: Bearer ${{ secrets.REPO_TOKEN }}" \
+              https://api.github.com/repos/${{ github.repository }}/actions/runs/$run_id
+          done
+        done
+      env:
+        GH_TOKEN: ${{ secrets.REPO_TOKEN }}

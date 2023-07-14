@@ -1,0 +1,77 @@
+name: 'App_build'
+
+on:
+  push:
+    branches:
+      - '*'
+
+env:
+  AWS_REGION: us-east-1
+  APP_WORKING_DIR: 'kubernetes'
+
+jobs:
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    defaults:
+        run:
+          working-directory: ${{ env.APP_WORKING_DIR }}
+
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v2
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v1
+
+    - name: Login to DockerHub
+      uses: docker/login-action@v1 
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }} 
+
+    - name: Build and push Docker images
+      uses: docker/build-push-action@v2
+      with:
+        context: app
+        push: true
+        tags: siutex/devops:joke_service
+
+  eks_deploy:
+    name: Eks app deploy
+    runs-on: ubuntu-latest
+    defaults:
+        run:
+          working-directory: ${{ env.APP_WORKING_DIR }}
+
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v2
+
+    - name: Retrieve Secret from Secrets Manager
+      id: retrieve_secret
+      run: |
+        echo "CLUSTER_NAME=$(aws secretsmanager get-secret-value --secret-id cluster_name --query SecretString --output text)" >> $GITHUB_ENV
+    
+    - name: Setup AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Configure kubectl
+      run: |
+        aws eks --region ${{ env.AWS_REGION }} update-kubeconfig --name my-cluster    
+
+    - name: Install Kustomize
+      run: |
+        curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"  | bash
+        sudo mv kustomize /usr/local/bin/
+
+    - name: Deploy to Kubernetes
+      run: kustomize build . | kubectl apply -f -
+      working-directory: kubernetes
+      
+    - name: Verify service
+      run: kubectl get svc joke-service

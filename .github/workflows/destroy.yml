@@ -1,0 +1,49 @@
+name: 'Destroy'
+
+on:
+    workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: 0.14.10
+  TF_WORKING_DIR: 'terraform'
+
+jobs:
+  destroy:
+    name: 'Destroy'
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v1
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+    - name: 'SSH Key Setup'
+      run: |
+          mkdir -p $HOME/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > $HOME/.ssh/id_rsa
+          chmod 600 $HOME/.ssh/id_rsa
+          ssh-keygen -y -f $HOME/.ssh/id_rsa > $HOME/.ssh/id_rsa.pub
+          echo "PUBLIC_KEY=$(cat $HOME/.ssh/id_rsa.pub)" >> $GITHUB_ENV
+    - name: Setup AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+    - name: Terraform Init
+      run: terraform init
+  
+    - name: Terraform Validate
+      run: terraform validate -no-color
+    - name: Terraform Destroy   
+      run: terraform destroy -auto-approve -no-color
+      env:
+        TF_VAR_public_key: ${{ env.PUBLIC_KEY }}
